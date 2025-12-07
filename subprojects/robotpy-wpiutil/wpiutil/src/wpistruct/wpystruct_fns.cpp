@@ -13,12 +13,12 @@ void forEachNested(
 
 nb::str getTypeName(const nb::type_object &t) {
   WPyStructInfo info(t);
-  return nb::steal<nb::str>(nb::cast(wpi::GetStructTypeName<WPyStruct, WPyStructInfo>(info)));
+  return nb::borrow<nb::str>(nb::cast(wpi::GetStructTypeName<WPyStruct, WPyStructInfo>(info)));
 }
 
 nb::str getSchema(const nb::type_object &t) {
   WPyStructInfo info(t);
-  return nb::steal<nb::str>(nb::cast(wpi::GetStructSchema<WPyStruct, WPyStructInfo>(info)));
+  return nb::borrow<nb::str>(nb::cast(wpi::GetStructSchema<WPyStruct, WPyStructInfo>(info)));
 }
 
 size_t getSize(const nb::type_object &t) {
@@ -60,7 +60,7 @@ nb::bytes packArray(const nb::sequence &seq) {
 
   WPyStructInfo info(nb::borrow<nb::type_object>(seq[0].type()));
   auto sz = wpi::GetStructSize<WPyStruct>(info);
-  auto total = sz; //*len;
+  auto total = sz*len;
 
   PyObject *b = PyBytes_FromStringAndSize(NULL, total);
   if (b == NULL) {
@@ -122,7 +122,7 @@ nb::typed<nb::list, WPyStruct> unpackArray(const nb::type_object &t, const nb::n
   }
 
   auto items = buf.size() / sz;
-  nb::list a(PyList_New(items));
+  nb::object a(nb::steal(PyList_New(items)));
   if (!a.is_valid()) {
     throw nb::python_error();
   }
@@ -136,7 +136,7 @@ nb::typed<nb::list, WPyStruct> unpackArray(const nb::type_object &t, const nb::n
     ptr += sz;
   }
 
-  return a;
+  return nb::list(a);
 }
 
 // void unpackInto(const nb::buffer &b, WPyStruct *v) {

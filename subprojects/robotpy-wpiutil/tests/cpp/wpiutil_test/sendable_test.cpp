@@ -14,7 +14,7 @@ public:
 
   ~MySendableBuilder() {
     // leak this so the python interpreter doesn't crash on shutdown
-    keys.release();
+    // keys.release();
   }
 
   void SetSmartDashboardType(std::string_view type) override {}

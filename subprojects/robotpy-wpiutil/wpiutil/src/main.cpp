@@ -14,7 +14,7 @@ void ResetSendableRegistry();
 } // namespace wpi::impl
 
 void cleanup_sendable_registry() {
-  nb::gil_scoped_release unlock;
+  // nb::gil_scoped_release unlock; -- TODO: probably released this due to deadlock?
   wpi::impl::ResetSendableRegistry();
 }
 
