@@ -38,77 +38,81 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "wpi/json.h"
 
-#include "pybind11/pybind11.h"
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
 namespace pyjson
 {
     using number_unsigned_t = uint64_t;
     using number_integer_t = int64_t;
 
-    inline py::object from_json(const wpi::json& j)
+    inline nb::object from_json(const wpi::json& j)
     {
         if (j.is_null())
         {
-            return py::none();
+            return nb::none();
         }
         else if (j.is_boolean())
         {
-            return py::bool_(j.get<bool>());
+            return nb::bool_(j.get<bool>());
         }
         else if (j.is_number_unsigned())
         {
-            return py::int_(j.get<number_unsigned_t>());
+            return nb::int_(j.get<number_unsigned_t>());
         }
         else if (j.is_number_integer())
         {
-            return py::int_(j.get<number_integer_t>());
+            return nb::int_(j.get<number_integer_t>());
         }
         else if (j.is_number_float())
         {
-            return py::float_(j.get<double>());
+            return nb::float_(j.get<double>());
         }
         else if (j.is_string())
         {
-            return py::str(j.get<std::string>());
+            auto s = j.get<std::string>();
+            return nb::str(s.data(), s.size());
         }
         else if (j.is_array())
         {
-            py::list obj(j.size());
+            nb::object obj(nb::steal(PyList_New(j.size())));
             for (std::size_t i = 0; i < j.size(); i++)
             {
-                obj[i] = from_json(j[i]);
+                nb::object o = from_json(j[i]);
+                NB_LIST_SET_ITEM(obj.ptr(), i, o.ptr());
             }
-            return std::move(obj);
+            return obj;
         }
         else // Object
         {
-            py::dict obj;
+            nb::dict obj;
             for (wpi::json::const_iterator it = j.cbegin(); it != j.cend(); ++it)
             {
-                obj[py::str(it.key())] = from_json(it.value());
+                auto key = it.key();
+                obj[nb::str(key.data(), key.size())] = from_json(it.value());
             }
-            return std::move(obj);
+            return obj;
         }
     }
 
-    inline wpi::json to_json(const py::handle& obj)
+    inline wpi::json to_json(const nb::handle& obj)
     {
         if (obj.ptr() == nullptr || obj.is_none())
         {
             return nullptr;
         }
-        if (py::isinstance<py::bool_>(obj))
+        if (nb::isinstance<nb::bool_>(obj))
         {
-            return obj.cast<bool>();
+            return nb::cast<bool>(obj);
         }
-        if (py::isinstance<py::int_>(obj))
+        if (nb::isinstance<nb::int_>(obj))
         {
             try
             {
-                number_integer_t s = obj.cast<number_integer_t>();
-                if (py::int_(s).equal(obj))
+                number_integer_t s = nb::cast<number_integer_t>(obj);
+                if (nb::int_(s).equal(obj))
                 {
                     return s;
                 }
@@ -118,8 +122,8 @@ namespace pyjson
             }
             try
             {
-                number_unsigned_t u = obj.cast<number_unsigned_t>();
-                if (py::int_(u).equal(obj))
+                number_unsigned_t u = nb::cast<number_integer_t>(obj);
+                if (nb::int_(u).equal(obj))
                 {
                     return u;
                 }
@@ -127,49 +131,56 @@ namespace pyjson
             catch (...)
             {
             }
-            throw py::value_error("to_json received an integer out of range for both number_integer_t and number_unsigned_t type: " + py::repr(obj).cast<std::string>());
+            std::string msg("to_json received an integer out of range for both number_integer_t and number_unsigned_t type: ");
+            msg += nb::cast<std::string>(nb::repr(obj));
+            throw nb::value_error(msg.c_str());
         }
-        if (py::isinstance<py::float_>(obj))
+        if (nb::isinstance<nb::float_>(obj))
         {
-            return obj.cast<double>();
+            return nb::cast<double>(obj);
         }
-        // if (py::isinstance<py::bytes>(obj))
+        // if (nb::isinstance<nb::bytes>(obj))
         // {
-        //     py::module base64 = py::module::import("base64");
+        //     nb::module_ base64 = nb::module::import("base64");
         //     return base64.attr("b64encode")(obj).attr("decode")("utf-8").cast<std::string>();
         // }
-        if (py::isinstance<py::str>(obj))
+        if (nb::isinstance<nb::str>(obj))
         {
-            return obj.cast<std::string>();
+            return nb::cast<std::string>(obj);
         }
-        if (py::isinstance<py::tuple>(obj) || py::isinstance<py::list>(obj))
+        if (nb::isinstance<nb::tuple>(obj) || nb::isinstance<nb::list>(obj))
         {
             auto out = wpi::json::array();
-            for (const py::handle value : obj)
+            for (const nb::handle value : obj)
             {
                 out.push_back(to_json(value));
             }
             return out;
         }
-        if (py::isinstance<py::dict>(obj))
+        if (nb::isinstance<nb::dict>(obj))
         {
             auto out = wpi::json::object();
-            for (const py::handle key : obj)
+            for (const nb::handle key : obj)
             {
-                if (py::isinstance<py::str>(key)) {
-                    out[key.cast<std::string>()] = to_json(obj[key]);
+                if (nb::isinstance<nb::str>(key)) {
+                    out[nb::cast<std::string>(key)] = to_json(obj[key]);
 
-                } else if (py::isinstance<py::int_>(key) || py::isinstance<py::float_>(key) ||
-                           py::isinstance<py::bool_>(key) || py::isinstance<py::none>(key)) {
+                } else if (nb::isinstance<nb::int_>(key) || nb::isinstance<nb::float_>(key) ||
+                           nb::isinstance<nb::bool_>(key) || nb::isinstance(key, nb::none())) {
                     // only allow the same implicit conversions python allows
-                    out[py::str(key).cast<std::string>()] = to_json(obj[key]);
+                    out[nb::cast<std::string>(nb::str(key))] = to_json(obj[key]);
                 } else {
-                    throw py::type_error("JSON keys must be str, int, float, bool, or None, not " + py::repr(key).cast<std::string>());
+                    std::string msg("JSON keys must be str, int, float, bool, or None, not ");
+                    msg += nb::cast<std::string>(nb::repr(key));
+                    throw nb::type_error(msg.c_str());
                 }
             }
             return out;
         }
-        throw py::type_error("Object of type " + py::type::of(obj).attr("__name__").cast<std::string>() + " is not JSON serializable");
+        std::string msg("Object of type ");
+        msg += nb::cast<std::string>(obj.type().attr("__name__"));
+        msg += " is not JSON serializable";
+        throw nb::type_error(msg.c_str());
     }
 }
 
@@ -187,7 +198,7 @@ namespace wpi
                                                            \
         inline static T from_json(const json& j)           \
         {                                                  \
-            return pyjson::from_json(j);                   \
+            return nb::steal<T>(pyjson::from_json(j));     \
         }                                                  \
     }
 
@@ -201,59 +212,67 @@ namespace wpi
         }                                                  \
     }
 
-    MAKE_NLJSON_SERIALIZER_DESERIALIZER(py::object);
+    MAKE_NLJSON_SERIALIZER_DESERIALIZER(nb::object);
 
-    MAKE_NLJSON_SERIALIZER_DESERIALIZER(py::bool_);
-    MAKE_NLJSON_SERIALIZER_DESERIALIZER(py::int_);
-    MAKE_NLJSON_SERIALIZER_DESERIALIZER(py::float_);
-    MAKE_NLJSON_SERIALIZER_DESERIALIZER(py::str);
+    MAKE_NLJSON_SERIALIZER_DESERIALIZER(nb::bool_);
+    MAKE_NLJSON_SERIALIZER_DESERIALIZER(nb::int_);
+    MAKE_NLJSON_SERIALIZER_DESERIALIZER(nb::float_);
+    MAKE_NLJSON_SERIALIZER_DESERIALIZER(nb::str);
 
-    MAKE_NLJSON_SERIALIZER_DESERIALIZER(py::list);
-    MAKE_NLJSON_SERIALIZER_DESERIALIZER(py::tuple);
-    MAKE_NLJSON_SERIALIZER_DESERIALIZER(py::dict);
+    MAKE_NLJSON_SERIALIZER_DESERIALIZER(nb::list);
+    MAKE_NLJSON_SERIALIZER_DESERIALIZER(nb::tuple);
+    MAKE_NLJSON_SERIALIZER_DESERIALIZER(nb::dict);
 
-    MAKE_NLJSON_SERIALIZER_ONLY(py::handle);
-    MAKE_NLJSON_SERIALIZER_ONLY(py::detail::item_accessor);
-    MAKE_NLJSON_SERIALIZER_ONLY(py::detail::list_accessor);
-    MAKE_NLJSON_SERIALIZER_ONLY(py::detail::tuple_accessor);
-    MAKE_NLJSON_SERIALIZER_ONLY(py::detail::sequence_accessor);
-    MAKE_NLJSON_SERIALIZER_ONLY(py::detail::str_attr_accessor);
-    MAKE_NLJSON_SERIALIZER_ONLY(py::detail::obj_attr_accessor);
+    // MAKE_NLJSON_SERIALIZER_ONLY(nb::handle);
+    // MAKE_NLJSON_SERIALIZER_ONLY(nb::detail::item_accessor);
+    // MAKE_NLJSON_SERIALIZER_ONLY(nb::detail::list_accessor);
+    // MAKE_NLJSON_SERIALIZER_ONLY(nb::detail::tuple_accessor);
+    // MAKE_NLJSON_SERIALIZER_ONLY(nb::detail::sequence_accessor);
+    // MAKE_NLJSON_SERIALIZER_ONLY(nb::detail::str_attr_accessor);
+    // MAKE_NLJSON_SERIALIZER_ONLY(nb::detail::obj_attr_accessor);
 
     #undef MAKE_NLJSON_SERIALIZER
     #undef MAKE_NLJSON_SERIALIZER_ONLY
 }
 
-// pybind11 caster
-namespace pybind11
+NAMESPACE_BEGIN(NB_NAMESPACE)
+NAMESPACE_BEGIN(detail)
+
+template <> struct type_caster<wpi::json>
 {
-    namespace detail
+public:
+    NB_TYPE_CASTER(wpi::json, const_name("wpiutil.json"));
+
+    bool from_python(handle src, uint8_t flags, cleanup_list *cleanup) noexcept
     {
-        template <> struct type_caster<wpi::json>
+        try
         {
-        public:
-            PYBIND11_TYPE_CASTER(wpi::json, _("wpiutil.json"));
-
-            bool load(handle src, bool convert)
-            {
-                // TODO: raising errors gives the user informative error messages,
-                //       but at the expense of proper argument parsing..
-                // try
-                // {
-                    value = pyjson::to_json(src);
-                    return true;
-                // }
-                // catch (...)
-                // {
-                //     return false;
-                // }
+            value = pyjson::to_json(src);
+            return true;
+        }
+        catch (builtin_exception &e)
+        {
+            if (e.type() == exception_type::value_error) {
+                PyErr_SetString(PyExc_ValueError, e.what());
+            } else {
+                PyErr_SetString(PyExc_TypeError, e.what());
             }
+        }
+        catch (python_error &e)
+        {
+            e.restore();
+        }
 
-            static handle cast(wpi::json src, return_value_policy /* policy */, handle /* parent */)
-            {
-                object obj = pyjson::from_json(src);
-                return obj.release();
-            }
-        };
+        return false;
     }
-}
+
+    static handle from_cpp(wpi::json src, rv_policy policy, cleanup_list *cleanup) noexcept
+    {
+        object obj = pyjson::from_json(src);
+        return obj.release();
+    }
+};
+
+NAMESPACE_END(detail)
+NAMESPACE_END(NB_NAMESPACE)
+

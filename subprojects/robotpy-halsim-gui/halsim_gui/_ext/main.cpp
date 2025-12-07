@@ -14,9 +14,9 @@ SEMIWRAP_PYBIND11_MODULE(m) {
           if (std::string_view{name} == HALSIMGUI_EXT_ADDGUILATEEXECUTE) {
             auto AddGuiLateExecute = (halsimgui::AddGuiLateExecuteFn)data;
             AddGuiLateExecute([] {
-              py::gil_scoped_acquire gil;
+              nb::gil_scoped_acquire gil;
               if (PyErr_CheckSignals() == -1) {
-                throw py::error_already_set();
+                throw nb::python_error();
               }
             });
           }
